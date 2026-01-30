@@ -1,4 +1,11 @@
+import os
+import sys
 import torch
+
+# Ensure repo root is on sys.path when running as a script.
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 from models.nnkf import KalmanNet
 from models.SystemModel import RobotSensorFusion
 from config.config import get_general_settings

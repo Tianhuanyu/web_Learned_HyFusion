@@ -77,6 +77,32 @@ The repository is organized into the following folders:
 - **pipeline**: The training and evaluation pipeline (e.g., `pipeline/pipeline.py`).
 - **train**: Training scripts (e.g., `train/trainModel.py` and `train/trainOrigin.py`).
 
+## Data Notes (CSV Requirements)
+
+Training scripts expect per-trial CSV files at:
+
+```
+data/0/saved_state.csv
+data/1/saved_state.csv
+...
+data/18/saved_state.csv
+```
+
+Each CSV must be **headerless** and **numeric-only** (float values). One row corresponds to one timestamp. The intended column layout is:
+
+```
+0-2   observation position (x, y, z)
+3-6   observation quaternion (qw, qx, qy, qz)
+7-12  twist (vx, vy, vz, wx, wy, wz)
+13-14 reprojection errors (two scalars)
+15-17 ground-truth position (x, y, z)
+18-21 ground-truth quaternion (qw, qx, qy, qz)
+```
+
+Minimum required columns: **22**. The training input is built as:
+`[observation_pose(7), reprojection_error(1), twist(6)]` → total 14 values,
+and the training target is the ground-truth pose (7 values).
+
 
 
 ## Contact

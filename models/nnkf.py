@@ -1,5 +1,5 @@
 import torch
-from SystemModel import SystemModel
+from models.SystemModel import SystemModel
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -74,6 +74,9 @@ class ESKF_Torch(nn.Module):
         self.predict(control_vector=twist)
         state = self.update(measurement)
         return state
+
+# Backwards-compatible alias for earlier imports.
+ESKFTorch = ESKF_Torch
 
 # KalmanNetOrigin: variant of KalmanNet using the ESKF approach.
 class KalmanNetOrigin(ESKF_Torch):
@@ -244,67 +247,5 @@ class KalmanNetV2(KalmanNetOrigin):
             nn.ReLU()
         ).to(self.device)
 
-class KalmanNet(KalmanNetV2):
-    def __init__(self, system_model: SystemModel, initial_state: torch.Tensor, initial_covariance: torch.Tensor, args, dt):
-        super().__init__(system_model, initial_state, initial_covariance, args, dt)
-
-    def init_hidden_KNet(self, re_error):
-        weight = next(self.parameters()).data
-        hidden = weight.new(self.seq_len_input, self.batch_size, self.d_hidden_S).zero_()
-        self.h_S = hidden.data
-        self.h_S = self.init_S.reshape(1, 1, -1).repeat(self.seq_len_input, self.batch_size, 1).to(self.device)
-        hidden = weight.new(self.seq_len_input, self.batch_size, self.d_hidden_Sigma).zero_()
-        self.h_Sigma = hidden.data
-        self.h_Sigma = self.prior_Sigma.reshape(1, 1, -1).repeat(self.seq_len_input, self.batch_size, 1).to(self.device)
-        hidden = weight.new(self.seq_len_input, self.batch_size, self.d_hidden_Q).zero_()
-        self.h_Q = hidden.data
-        self.h_Q = self.init_Q.reshape(1, 1, -1).repeat(self.seq_len_input, self.batch_size, 1).to(self.device)
-        if re_error is not None:
-            re_error = re_error.permute(2, 0, 1)
-            self.h_S = self.h_S * re_error
-            self.h_Sigma = self.h_Sigma * re_error
-
-    def reset_state(self, init_state, re_error=None):
-        self.state = init_state
-        self.init_hidden_KNet(re_error)
-
-    def KNet_step(self, x):
-        twist = x[8:14].unsqueeze(0).permute(2, 1, 0)
-        F_matrix = self.system_model._compute_state_transition_matrix(self._dt)
-        B_matrix = self.system_model._compute_control_matrix(self._dt, self.state)
-        measurement = x[0:7].unsqueeze(0).permute(2, 1, 0)
-        self.error_state_prior = F_matrix @ self.error_state + B_matrix @ twist
-        self.predict_state = self.system_model._state_injection(self._dt, self.state, self.error_state_prior)
-        self.step_KGain_est(measurement)
-        dy = measurement - self.predict_state
-        INOV = torch.bmm(self.KGain, dy)
-        if not self.training:
-            min_mag = torch.zeros_like(INOV).to(self.device)
-            max_mag = torch.tensor([0.005, 0.005, 0.005, 0.1, 0.1, 0.1]).unsqueeze(0).unsqueeze(2).repeat(self.args.n_batch, 1, 1).to(self.device) * 100.0
-            sign = INOV.sign()
-            INOV = INOV.abs_().clamp_(min_mag, max_mag)
-            INOV = INOV * sign
-        mask = torch.norm(measurement[:, 3, 0]) > 1.0
-        _state = self.state.clone()
-        _state[mask, :, :] = measurement[mask, :, :]
-        self.state = self.system_model._state_injection(self._dt, _state, INOV)
-        self.last_measurement = measurement
-        self.previous_error_state = self.error_state
-        self.error_state = torch.zeros_like(self.error_state)
-        return self.state
-
-    def step_KGain_est(self, state):
-        obs_diff = torch.squeeze(state, 2) - torch.squeeze(self.state, 2)
-        obs_innov_diff = torch.squeeze(state, 2) - torch.squeeze(self.predict_state, 2)
-        fw_evol_diff = torch.squeeze(self.error_state, 2) - torch.squeeze(self.error_state_prior, 2)
-        fw_update_diff = torch.squeeze(self.error_state, 2) - torch.squeeze(self.previous_error_state, 2)
-        obs_diff = F.normalize(obs_diff, p=2, dim=1, eps=1e-12)
-        obs_innov_diff = F.normalize(obs_innov_diff, p=2, dim=1, eps=1e-12)
-        fw_evol_diff = F.normalize(fw_evol_diff, p=2, dim=1, eps=1e-12)
-        fw_update_diff = F.normalize(fw_update_diff, p=2, dim=1, eps=1e-12)
-        KG = self.KGain_step(obs_diff, obs_innov_diff, fw_evol_diff, fw_update_diff)
-        self.KGain = torch.reshape(KG, (self.batch_size, self.m, self.n))
-
-# Optionally, add an alias so that training scripts referring to KalmanNet use this implementation.
-# For example:
-# KalmanNet = KalmanNet
+# Alias KalmanNet to KalmanNetV2 so existing imports keep working.
+KalmanNet = KalmanNetV2
